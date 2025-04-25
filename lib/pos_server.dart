@@ -14,10 +14,20 @@ class _POSServerScreenState extends State<POSServerScreen> with WidgetsBindingOb
   ServerSocket? server;
   String? selectedClientID;
 
+String deviceName = 'Loading...';
+
+void _loadDeviceName() async {
+  final name = await getDeviceName();
+  setState(() {
+    deviceName = name;
+  });
+}
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _loadDeviceName();
     _getIPAddress();
     _startServer();
   }
@@ -132,7 +142,7 @@ class _POSServerScreenState extends State<POSServerScreen> with WidgetsBindingOb
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Main POS (Server) - $ipAddress'),
+        title: Text('Main POS - $ipAddress ($deviceName)'),
         actions: [
           IconButton(
             icon: Icon(Icons.power_settings_new),

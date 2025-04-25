@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'pos_mdns.dart';
 
 class POSClientScreen extends StatefulWidget {
-  final List<String>? foundServers;
+  final List<FoundPOS>? foundServers;
 
   const POSClientScreen({super.key, this.foundServers});
   @override
@@ -13,7 +13,7 @@ class POSClientScreen extends StatefulWidget {
 class _POSClientScreenState extends State<POSClientScreen> {
   Socket? socket;
   List<String> messages = [];
-  List<String> foundServers = [];
+  List<FoundPOS> foundServers = [];
   bool isLoading = true;
   String? connectedIP;
 
@@ -47,21 +47,27 @@ class _POSClientScreenState extends State<POSClientScreen> {
     }
   }
 
-  void _connectToSelectedServer(String ip) async {
-    await socket?.close();
-    socket = null;
+  String? mainPOSDeviceName;
+
+void _connectToSelectedServer(FoundPOS pos) async {
+  final ip = pos.ip;
+  await socket?.close();
+  socket = null;
+
+  setState(() {
+    connectedIP = ip;
+    mainPOSDeviceName = pos.deviceName; // 👈 디바이스 이름 저장
+    messages.add("🔌 Connecting to $ip (${mainPOSDeviceName ?? ''})...");
+    isLoading = true;
+  });
+
+  try {
+    socket = await Socket.connect(ip, 34041);
     setState(() {
-      connectedIP = ip;
-      messages.add("🔌 Connecting to $ip...");
-      isLoading = true;
+      messages.add("✅ Connected to $ip (${mainPOSDeviceName ?? ''})");
+      isLoading = false;
     });
 
-    try {
-      socket = await Socket.connect(ip, 34041);
-      setState(() {
-        messages.add("✅ Connected to $ip");
-        isLoading = false;
-      });
 
       socket!.listen(
         (data) {
@@ -108,10 +114,10 @@ class _POSClientScreenState extends State<POSClientScreen> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children:
-                foundServers.map((ip) {
-                  final isConnected = ip == connectedIP;
+                foundServers.map((pos) {
+                  final isConnected = pos.ip == connectedIP;
                   return ListTile(
-                    title: Text(ip),
+                    title: Text('device: ${pos.deviceName} ip:${pos.ip}'),
                     trailing:
                         isConnected
                             ? Icon(Icons.check_circle, color: Colors.green)
@@ -119,7 +125,7 @@ class _POSClientScreenState extends State<POSClientScreen> {
                     onTap: () {
                       Navigator.pop(context);
                       if (!isConnected) {
-                        _connectToSelectedServer(ip);
+                        _connectToSelectedServer(pos);
                       }
                     },
                   );
@@ -143,8 +149,9 @@ class _POSClientScreenState extends State<POSClientScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Client POS ${connectedIP != null ? ' - $connectedIP' : ''}',
-        ),
+  'Client POS - Connected to ${mainPOSDeviceName ?? connectedIP ?? 'Unknown'}',
+),
+
         actions: [
           IconButton(
             icon: Icon(Icons.swap_horiz),
