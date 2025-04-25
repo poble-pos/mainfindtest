@@ -17,6 +17,8 @@ class _POSServerScreenState extends State<POSServerScreen>
 
   String deviceName = 'Loading...';
 
+  final ScrollController _scrollController = ScrollController();
+
   void _loadDeviceName() async {
     final name = await getDeviceName();
     setState(() {
@@ -93,22 +95,26 @@ class _POSServerScreenState extends State<POSServerScreen>
             final deviceName = msg.replaceFirst('[DEVICE_NAME]', '').trim();
             setState(() {
               clientNames[clientID] = deviceName;
-              messages.add('🆔 $clientID is "$deviceName"');
+              messages.add('🆔 $clientID is "$deviceName"');              
             });
           } else {
             final name = clientNames[clientID] ?? clientID;
             setState(() => messages.add('$name: $msg'));
+            sendToAll(msg);            
           }
+          _scrollToBottom();
         },
         onDone: () {
           clients.remove(clientID);
           final name = clientNames.remove(clientID) ?? clientID;
           setState(() => messages.add('❌ Disconnected: $name'));
+          _scrollToBottom();
         },
         onError: (e) {
           clients.remove(clientID);
           final name = clientNames.remove(clientID) ?? clientID;
           setState(() => messages.add('⚠️ Error ($name): $e'));
+          _scrollToBottom();
         },
         cancelOnError: true,
       );
@@ -149,6 +155,15 @@ class _POSServerScreenState extends State<POSServerScreen>
     await stopAdvertisement();
     Navigator.pop(context);
   }
+
+void _scrollToBottom() {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    }
+  });
+}
+
 
   @override
   Widget build(BuildContext context) {
@@ -195,6 +210,7 @@ class _POSServerScreenState extends State<POSServerScreen>
           Expanded(
             flex: 2,
             child: ListView(
+              controller: _scrollController,
               padding: EdgeInsets.all(8),
               children: messages.map((m) => Text(m)).toList(),
             ),

@@ -1,6 +1,11 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:mainfindtest/mock.dart';
 import 'pos_mdns.dart';
+
+import 'dart:async';
+import 'dart:math';
+
 
 class POSClientScreen extends StatefulWidget {
   final List<FoundPOS>? foundServers;
@@ -17,6 +22,11 @@ class _POSClientScreenState extends State<POSClientScreen> {
   bool isLoading = true;
   String? connectedIP;
 
+
+Timer? autoSendTimer;
+final Random _rand = Random();
+
+
   @override
   void initState() {
     super.initState();
@@ -32,7 +42,21 @@ class _POSClientScreenState extends State<POSClientScreen> {
       // 수동 진입한 경우 또는 fallback
       _searchAndConnectToServer();
     }
+    _startAutoSending();
   }
+
+void _startAutoSending() {
+  autoSendTimer?.cancel();
+  autoSendTimer = Timer.periodic(Duration(seconds: 10), (_) async {
+    final count = _rand.nextInt(3) + 3; // 3~5개 메시지
+    for (int i = 0; i < count; i++) {
+      await Future.delayed(Duration(milliseconds: 1000 + _rand.nextInt(1500)));
+      final msg = generateRandomOrder();
+      _sendMessage(msg.toJson().toString());
+    }
+  });
+}
+
 
   void _searchAndConnectToServer() async {
     final servers = await findMainPOSList();
@@ -72,6 +96,7 @@ void _connectToSelectedServer(FoundPOS pos) async {
       (data) {
         final msg = String.fromCharCodes(data);
         setState(() => messages.add('Server: $msg'));
+        _scrollToBottom();
       },
       onDone: () {
         setState(() {
@@ -143,9 +168,19 @@ void _connectToSelectedServer(FoundPOS pos) async {
 
   @override
   void dispose() {
+    autoSendTimer?.cancel();
     socket?.close();
     super.dispose();
   }
+
+    final ScrollController _scrollController = ScrollController();
+void _scrollToBottom() {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (_scrollController.hasClients) {
+      _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+    }
+  });
+}
 
   @override
   Widget build(BuildContext context) {
@@ -174,6 +209,7 @@ void _connectToSelectedServer(FoundPOS pos) async {
                 children: [
                   Expanded(
                     child: ListView(
+                      controller: _scrollController,
                       padding: EdgeInsets.all(12),
                       children: messages.map((m) => Text(m)).toList(),
                     ),
