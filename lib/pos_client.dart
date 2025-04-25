@@ -56,47 +56,52 @@ void _connectToSelectedServer(FoundPOS pos) async {
 
   setState(() {
     connectedIP = ip;
-    mainPOSDeviceName = pos.deviceName; // 👈 디바이스 이름 저장
+    mainPOSDeviceName = pos.deviceName;
     messages.add("🔌 Connecting to $ip (${mainPOSDeviceName ?? ''})...");
     isLoading = true;
   });
 
   try {
     socket = await Socket.connect(ip, 34041);
+
+    // ✅ 연결 직후 장비 이름 전송
+    final myDeviceName = await getDeviceName();
+    socket!.write('[DEVICE_NAME]$myDeviceName');
+
+    socket!.listen(
+      (data) {
+        final msg = String.fromCharCodes(data);
+        setState(() => messages.add('Server: $msg'));
+      },
+      onDone: () {
+        setState(() {
+          messages.add("❌ Disconnected from server.");
+          socket = null;
+          connectedIP = null;
+        });
+      },
+      onError: (e) {
+        setState(() {
+          messages.add("⚠️ Socket error: $e");
+          socket = null;
+          connectedIP = null;
+        });
+      },
+    );
+
     setState(() {
       messages.add("✅ Connected to $ip (${mainPOSDeviceName ?? ''})");
       isLoading = false;
     });
-
-
-      socket!.listen(
-        (data) {
-          final msg = String.fromCharCodes(data);
-          setState(() => messages.add('Server: $msg'));
-        },
-        onDone: () {
-          setState(() {
-            messages.add("❌ Disconnected from server.");
-            socket = null;
-            connectedIP = null;
-          });
-        },
-        onError: (e) {
-          setState(() {
-            messages.add("⚠️ Socket error: $e");
-            socket = null;
-            connectedIP = null;
-          });
-        },
-      );
-    } catch (e) {
-      setState(() {
-        messages.add("❌ Connection failed: $e");
-        connectedIP = null;
-        isLoading = false;
-      });
-    }
+  } catch (e) {
+    setState(() {
+      messages.add("❌ Connection failed: $e");
+      connectedIP = null;
+      isLoading = false;
+    });
   }
+}
+
 
   void _sendMessage(String msg) {
     if (socket != null && msg.trim().isNotEmpty) {

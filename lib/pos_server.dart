@@ -7,21 +7,22 @@ class POSServerScreen extends StatefulWidget {
   _POSServerScreenState createState() => _POSServerScreenState();
 }
 
-class _POSServerScreenState extends State<POSServerScreen> with WidgetsBindingObserver {
+class _POSServerScreenState extends State<POSServerScreen>
+    with WidgetsBindingObserver {
   Map<String, Socket> clients = {};
   List<String> messages = [];
   String ipAddress = 'Loading...';
   ServerSocket? server;
   String? selectedClientID;
 
-String deviceName = 'Loading...';
+  String deviceName = 'Loading...';
 
-void _loadDeviceName() async {
-  final name = await getDeviceName();
-  setState(() {
-    deviceName = name;
-  });
-}
+  void _loadDeviceName() async {
+    final name = await getDeviceName();
+    setState(() {
+      deviceName = name;
+    });
+  }
 
   @override
   void initState() {
@@ -74,6 +75,7 @@ void _loadDeviceName() async {
     });
   }
 
+  Map<String, String> clientNames = {}; // clientID -> deviceName
   void _startServer() async {
     await advertiseMainPOS();
     server = await ServerSocket.bind(InternetAddress.anyIPv4, 34041);
@@ -86,15 +88,27 @@ void _loadDeviceName() async {
       client.listen(
         (data) {
           final msg = String.fromCharCodes(data);
-          setState(() => messages.add('$clientID: $msg'));
+
+          if (msg.startsWith('[DEVICE_NAME]')) {
+            final deviceName = msg.replaceFirst('[DEVICE_NAME]', '').trim();
+            setState(() {
+              clientNames[clientID] = deviceName;
+              messages.add('🆔 $clientID is "$deviceName"');
+            });
+          } else {
+            final name = clientNames[clientID] ?? clientID;
+            setState(() => messages.add('$name: $msg'));
+          }
         },
         onDone: () {
           clients.remove(clientID);
-          setState(() => messages.add('❌ Disconnected: $clientID'));
+          final name = clientNames.remove(clientID) ?? clientID;
+          setState(() => messages.add('❌ Disconnected: $name'));
         },
         onError: (e) {
           clients.remove(clientID);
-          setState(() => messages.add('⚠️ Error ($clientID): $e'));
+          final name = clientNames.remove(clientID) ?? clientID;
+          setState(() => messages.add('⚠️ Error ($name): $e'));
         },
         cancelOnError: true,
       );
@@ -150,23 +164,26 @@ void _loadDeviceName() async {
             onPressed: () {
               showDialog(
                 context: context,
-                builder: (_) => AlertDialog(
-                  title: Text("Shutdown Server"),
-                  content: Text("Do you want to stop the server and return to the main screen?"),
-                  actions: [
-                    TextButton(
-                      child: Text("Cancel"),
-                      onPressed: () => Navigator.pop(context),
+                builder:
+                    (_) => AlertDialog(
+                      title: Text("Shutdown Server"),
+                      content: Text(
+                        "Do you want to stop the server and return to the main screen?",
+                      ),
+                      actions: [
+                        TextButton(
+                          child: Text("Cancel"),
+                          onPressed: () => Navigator.pop(context),
+                        ),
+                        ElevatedButton(
+                          child: Text("Shutdown"),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _shutdownServerAndExit();
+                          },
+                        ),
+                      ],
                     ),
-                    ElevatedButton(
-                      child: Text("Shutdown"),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        _shutdownServerAndExit();
-                      },
-                    ),
-                  ],
-                ),
               );
             },
           ),
@@ -189,18 +206,20 @@ void _loadDeviceName() async {
             child: ListView(
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.symmetric(horizontal: 8),
-              children: clients.keys.map((clientID) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4),
-                  child: ChoiceChip(
-                    label: Text(clientID),
-                    selected: selectedClientID == clientID,
-                    onSelected: (_) {
-                      setState(() => selectedClientID = clientID);
-                    },
-                  ),
-                );
-              }).toList(),
+              children:
+                  clients.keys.map((clientID) {
+                    final label = clientNames[clientID] ?? clientID;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: ChoiceChip(
+                        label: Text(label),
+                        selected: selectedClientID == clientID,
+                        onSelected: (_) {
+                          setState(() => selectedClientID = clientID);
+                        },
+                      ),
+                    );
+                  }).toList(),
             ),
           ),
           // 메시지 입력 및 전송 버튼
@@ -233,12 +252,19 @@ void _loadDeviceName() async {
 
                     controller.clear();
                   },
-                  itemBuilder: (_) => [
-                    PopupMenuItem(value: 'all', child: Text('Send to All')),
-                    PopupMenuItem(value: 'selected', child: Text('Send to Selected')),
-                    PopupMenuItem(value: 'others', child: Text('Send to Others')),
-                  ],
-                )
+                  itemBuilder:
+                      (_) => [
+                        PopupMenuItem(value: 'all', child: Text('Send to All')),
+                        PopupMenuItem(
+                          value: 'selected',
+                          child: Text('Send to Selected'),
+                        ),
+                        PopupMenuItem(
+                          value: 'others',
+                          child: Text('Send to Others'),
+                        ),
+                      ],
+                ),
               ],
             ),
           ),
