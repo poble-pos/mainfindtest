@@ -65,7 +65,7 @@ class _ManualTestScreenState extends State<ManualTestScreen> {
               controller: ipController,
               decoration: InputDecoration(
                 labelText: 'Server IP',
-                hintText: 'e.g. 192.168.0.48',
+                hintText: 'e.g. 192.168.XXX.XXX',
                 border: OutlineInputBorder(),
               ),
             ),

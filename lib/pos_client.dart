@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'pos_mdns.dart';
 
 class POSClientScreen extends StatefulWidget {
+  final List<String>? foundServers;
+
+  const POSClientScreen({super.key, this.foundServers});
   @override
   _POSClientScreenState createState() => _POSClientScreenState();
 }
-
 
 class _POSClientScreenState extends State<POSClientScreen> {
   Socket? socket;
@@ -18,78 +20,114 @@ class _POSClientScreenState extends State<POSClientScreen> {
   @override
   void initState() {
     super.initState();
-    _searchForServers();
+    if (widget.foundServers != null) {
+      // 서버 리스트가 이미 있는 경우
+      foundServers = widget.foundServers!;
+      isLoading = false;
+
+      if (foundServers.isNotEmpty) {
+        _connectToSelectedServer(foundServers.first);
+      }
+    } else {
+      // 수동 진입한 경우 또는 fallback
+      _searchAndConnectToServer();
+    }
   }
 
-  void _searchForServers() async {
+  void _searchAndConnectToServer() async {
     final servers = await findMainPOSList();
-    setState(() {
-      foundServers = servers;
-      isLoading = false;
-    });
+    if (servers.isNotEmpty) {
+      setState(() => foundServers = servers);
+      _connectToSelectedServer(servers.first);
+    } else {
+      setState(() {
+        foundServers = [];
+        isLoading = false;
+      });
+    }
   }
 
   void _connectToSelectedServer(String ip) async {
-  if (connectedIP == ip) {
-    final shouldDisconnect = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text("Already connected"),
-        content: Text("Already connected on $ip \n Disconnect?"),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text("Cancel"),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text("Confirm disconnect"),
-          ),
-        ],
-      ),
-    );
+    await socket?.close();
+    socket = null;
+    setState(() {
+      connectedIP = ip;
+      messages.add("🔌 Connecting to $ip...");
+      isLoading = true;
+    });
 
-    if (shouldDisconnect == true) {
-      await socket?.close();
+    try {
+      socket = await Socket.connect(ip, 34041);
       setState(() {
-        socket = null;
+        messages.add("✅ Connected to $ip");
+        isLoading = false;
+      });
+
+      socket!.listen(
+        (data) {
+          final msg = String.fromCharCodes(data);
+          setState(() => messages.add('Server: $msg'));
+        },
+        onDone: () {
+          setState(() {
+            messages.add("❌ Disconnected from server.");
+            socket = null;
+            connectedIP = null;
+          });
+        },
+        onError: (e) {
+          setState(() {
+            messages.add("⚠️ Socket error: $e");
+            socket = null;
+            connectedIP = null;
+          });
+        },
+      );
+    } catch (e) {
+      setState(() {
+        messages.add("❌ Connection failed: $e");
         connectedIP = null;
-        messages.add("🔌 Disconnected from $ip");
+        isLoading = false;
       });
     }
-    return;
   }
-
-  // 다른 서버로 전환
-  await socket?.close();
-  socket = null;
-  setState(() {
-    messages.add("🔌 Switching to $ip...");
-    connectedIP = ip;
-  });
-
-  try {
-    socket = await Socket.connect(ip, 34041);
-    setState(() => messages.add("✅ Connected to $ip"));
-
-    socket!.listen((data) {
-      final msg = String.fromCharCodes(data);
-      setState(() => messages.add('Server: $msg'));
-    });
-  } catch (e) {
-    setState(() {
-      messages.add("❌ Connection failed: $e");
-      connectedIP = null;
-    });
-  }
-}
-
 
   void _sendMessage(String msg) {
     if (socket != null && msg.trim().isNotEmpty) {
       socket!.write(msg);
       setState(() => messages.add('Me: $msg'));
     }
+  }
+
+  void _showServerSwitchDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text("Switch Server"),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children:
+                foundServers.map((ip) {
+                  final isConnected = ip == connectedIP;
+                  return ListTile(
+                    title: Text(ip),
+                    trailing:
+                        isConnected
+                            ? Icon(Icons.check_circle, color: Colors.green)
+                            : null,
+                    onTap: () {
+                      Navigator.pop(context);
+                      if (!isConnected) {
+                        _connectToSelectedServer(ip);
+                      }
+                    },
+                  );
+                }).toList(),
+          ),
+        );
+      },
+    );
   }
 
   @override
@@ -103,64 +141,48 @@ class _POSClientScreenState extends State<POSClientScreen> {
     TextEditingController controller = TextEditingController();
 
     return Scaffold(
-      appBar: AppBar(title: Text('Client POS')),
-      body: socket == null
-          ? isLoading
+      appBar: AppBar(
+        title: Text(
+          'Client POS ${connectedIP != null ? ' - $connectedIP' : ''}',
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(Icons.swap_horiz),
+            tooltip: 'Switch Server',
+            onPressed: foundServers.isEmpty ? null : _showServerSwitchDialog,
+          ),
+        ],
+      ),
+      body:
+          isLoading
               ? Center(child: CircularProgressIndicator())
-              : foundServers.isEmpty
-                  ? Center(child: Text('No Main POS found.'))
-                  : ListView.builder(
-                      padding: EdgeInsets.all(12),
-                      itemCount: foundServers.length,
-                      itemBuilder: (context, index) {
-                        final ip = foundServers[index];
-                        final isConnected = ip == connectedIP;
-
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: isConnected
-                                  ? Colors.green
-                                  : Theme.of(context).primaryColor,
-                                  foregroundColor: Colors.white, 
-                              padding: EdgeInsets.symmetric(vertical: 14),
-                            ),
-                            onPressed: () => _connectToSelectedServer(ip),
-                            icon: Icon(isConnected
-                                ? Icons.check_circle
-                                : Icons.wifi),
-                            label: Text(
-                              isConnected
-                                  ? 'Connected to $ip'
-                                  : 'Connect to $ip',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                          ),
-                        );
-                      },
-                    )
-          : Column(
-              children: [
-                Expanded(
+              : socket == null
+              ? Center(child: Text('No Main POS found.'))
+              : Column(
+                children: [
+                  Expanded(
                     child: ListView(
-                        padding: EdgeInsets.all(12),
-                        children: messages.map((m) => Text(m)).toList())),
-                Padding(
-                  padding: const EdgeInsets.all(8.0),
-                  child: Row(children: [
-                    Expanded(child: TextField(controller: controller)),
-                    IconButton(
-                      icon: Icon(Icons.send),
-                      onPressed: () {
-                        _sendMessage(controller.text);
-                        controller.clear();
-                      },
-                    )
-                  ]),
-                )
-              ],
-            ),
+                      padding: EdgeInsets.all(12),
+                      children: messages.map((m) => Text(m)).toList(),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.all(8.0),
+                    child: Row(
+                      children: [
+                        Expanded(child: TextField(controller: controller)),
+                        IconButton(
+                          icon: Icon(Icons.send),
+                          onPressed: () {
+                            _sendMessage(controller.text);
+                            controller.clear();
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
     );
   }
 }

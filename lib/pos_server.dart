@@ -7,17 +7,45 @@ class POSServerScreen extends StatefulWidget {
   _POSServerScreenState createState() => _POSServerScreenState();
 }
 
-class _POSServerScreenState extends State<POSServerScreen> {
-  final List<String> messages = [];
-  ServerSocket? server;
-  List<Socket> clients = [];
+class _POSServerScreenState extends State<POSServerScreen> with WidgetsBindingObserver {
+  Map<String, Socket> clients = {};
+  List<String> messages = [];
   String ipAddress = 'Loading...';
+  ServerSocket? server;
+  String? selectedClientID;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _getIPAddress();
     _startServer();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    for (var c in clients.values) {
+      c.close();
+    }
+    server?.close();
+    stopAdvertisement();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print("🔄 App resumed: restarting mDNS advertisement");
+      advertiseMainPOS();
+    } else if (state == AppLifecycleState.paused) {
+      print("⏸ App paused: stopping mDNS");
+      stopAdvertisement();
+    }
+  }
+
+  String _getClientID(Socket socket) {
+    return '${socket.remoteAddress.address}:${socket.remotePort}';
   }
 
   Future<void> _getIPAddress() async {
@@ -40,53 +68,62 @@ class _POSServerScreenState extends State<POSServerScreen> {
     await advertiseMainPOS();
     server = await ServerSocket.bind(InternetAddress.anyIPv4, 34041);
     server!.listen((client) {
-      clients.add(client);
-      final address = client.remoteAddress.address;
-      final port = client.remotePort;
+      final clientID = _getClientID(client);
+      clients[clientID] = client;
 
-      setState(() => messages.add('🔌 Client connected: $address:$port'));
+      setState(() => messages.add('🔌 Client connected: $clientID'));
 
       client.listen(
         (data) {
           final msg = String.fromCharCodes(data);
-          setState(() => messages.add('Client: $msg'));
+          setState(() => messages.add('$clientID: $msg'));
         },
         onDone: () {
-          clients.remove(client);
-          setState(() => messages.add('❌ Client disconnected: $address:$port'));
+          clients.remove(clientID);
+          setState(() => messages.add('❌ Disconnected: $clientID'));
         },
         onError: (e) {
-          clients.remove(client);
-          setState(() => messages.add('⚠️ Client error ($address:$port): $e'));
+          clients.remove(clientID);
+          setState(() => messages.add('⚠️ Error ($clientID): $e'));
         },
         cancelOnError: true,
       );
     });
   }
 
-  void _sendToClients(String msg) {
-    for (var client in clients) {
-      client.write(msg);
+  void sendToAll(String msg) {
+    for (var c in clients.values) {
+      c.write(msg);
     }
-    setState(() => messages.add('Me: $msg'));
+    setState(() => messages.add('📢 Me (to all): $msg'));
+  }
+
+  void sendToOthers(String msg, String excludeID) {
+    for (var entry in clients.entries) {
+      if (entry.key != excludeID) {
+        entry.value.write(msg);
+      }
+    }
+    setState(() => messages.add('📤 Me (to others): $msg'));
+  }
+
+  void sendToClient(String clientID, String msg) {
+    final target = clients[clientID];
+    if (target != null) {
+      target.write(msg);
+      setState(() => messages.add('➡️ Me (to $clientID): $msg'));
+    } else {
+      setState(() => messages.add('❌ Client $clientID not found.'));
+    }
   }
 
   Future<void> _shutdownServerAndExit() async {
-    for (var c in clients) {
+    for (var c in clients.values) {
       c.close();
     }
     server?.close();
     await stopAdvertisement();
-    Navigator.pop(context); // ⬅️ 메인 페이지로 돌아감
-  }
-
-  @override
-  void dispose() {
-    for (var c in clients) {
-      c.close();
-    }
-    server?.close();    
-    super.dispose();
+    Navigator.pop(context);
   }
 
   @override
@@ -101,50 +138,97 @@ class _POSServerScreenState extends State<POSServerScreen> {
             icon: Icon(Icons.power_settings_new),
             tooltip: 'Shutdown Server',
             onPressed: () {
-              // 🔴 Confirmation dialog before shutting down
               showDialog(
                 context: context,
-                builder:
-                    (_) => AlertDialog(
-                      title: Text("Shutdown Server"),
-                      content: Text(
-                        "Do you want to stop the server and return to the main screen?",
-                      ),
-                      actions: [
-                        TextButton(
-                          child: Text("Cancel"),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                        ElevatedButton(
-                          child: Text("Shutdown"),
-                          onPressed: () {
-                            Navigator.pop(context); // Close dialog
-                            _shutdownServerAndExit();
-                          },
-                        ),
-                      ],
+                builder: (_) => AlertDialog(
+                  title: Text("Shutdown Server"),
+                  content: Text("Do you want to stop the server and return to the main screen?"),
+                  actions: [
+                    TextButton(
+                      child: Text("Cancel"),
+                      onPressed: () => Navigator.pop(context),
                     ),
+                    ElevatedButton(
+                      child: Text("Shutdown"),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        _shutdownServerAndExit();
+                      },
+                    ),
+                  ],
+                ),
               );
             },
           ),
         ],
       ),
-
       body: Column(
         children: [
-          Expanded(child: ListView(children: messages.map(Text.new).toList())),
+          // 메시지 기록
+          Expanded(
+            flex: 2,
+            child: ListView(
+              padding: EdgeInsets.all(8),
+              children: messages.map((m) => Text(m)).toList(),
+            ),
+          ),
+          Divider(),
+          // 클라이언트 목록
+          Container(
+            height: 100,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.symmetric(horizontal: 8),
+              children: clients.keys.map((clientID) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: ChoiceChip(
+                    label: Text(clientID),
+                    selected: selectedClientID == clientID,
+                    onSelected: (_) {
+                      setState(() => selectedClientID = clientID);
+                    },
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          // 메시지 입력 및 전송 버튼
           Padding(
             padding: const EdgeInsets.all(8.0),
             child: Row(
               children: [
                 Expanded(child: TextField(controller: controller)),
-                IconButton(
+                PopupMenuButton<String>(
                   icon: Icon(Icons.send),
-                  onPressed: () {
-                    _sendToClients(controller.text);
+                  onSelected: (action) {
+                    final msg = controller.text.trim();
+                    if (msg.isEmpty) return;
+
+                    switch (action) {
+                      case 'all':
+                        sendToAll(msg);
+                        break;
+                      case 'selected':
+                        if (selectedClientID != null) {
+                          sendToClient(selectedClientID!, msg);
+                        }
+                        break;
+                      case 'others':
+                        if (selectedClientID != null) {
+                          sendToOthers(msg, selectedClientID!);
+                        }
+                        break;
+                    }
+
                     controller.clear();
                   },
-                ),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(value: 'all', child: Text('Send to All')),
+                    PopupMenuItem(value: 'selected', child: Text('Send to Selected')),
+                    PopupMenuItem(value: 'others', child: Text('Send to Others')),
+                  ],
+                )
               ],
             ),
           ),

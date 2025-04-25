@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:mainfindtest/manualTest.dart';
+import 'package:mainfindtest/pos_mdns.dart';
 import 'pos_server.dart';
 import 'pos_client.dart';
 
@@ -17,7 +18,49 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class RoleSelectorScreen extends StatelessWidget {
+class RoleSelectorScreen extends StatefulWidget {
+  @override
+  _RoleSelectorScreenState createState() => _RoleSelectorScreenState();
+}
+
+class _RoleSelectorScreenState extends State<RoleSelectorScreen> {
+  bool isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _autoDecideRole();
+  }
+
+  void _autoDecideRole() async {
+  final foundServers = await findMainPOSList();
+
+  if (foundServers.isEmpty) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => POSServerScreen()),
+    );
+  } else {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder: (_) => POSClientScreen(foundServers: foundServers),
+      ),
+    );
+  }
+}
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
+//select role by button
+class ManualRoleSelectorScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
